@@ -4,7 +4,7 @@ import TodoList from './components/todolist.jsx';
 import TodoEdit from './components/todoedit.jsx';
 import './App.css';
 
-const API_BASE_URL = '/todo';
+const API_BASE_URL = import.meta.env.VITE_API_URL || '/todo';
 
 function App() {
   const [todos, setTodos] = useState([]);
