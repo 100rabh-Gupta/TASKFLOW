@@ -4,7 +4,19 @@ import TodoList from './components/todolist.jsx';
 import TodoEdit from './components/todoedit.jsx';
 import './App.css';
 
-const API_BASE_URL = import.meta.env.VITE_API_URL || '/todo';
+// Automatically handle environment variable whether it includes /todo or trailing slash
+const getApiBaseUrl = () => {
+  const envUrl = (import.meta.env.VITE_API_URL || '').trim().replace(/\/+$/, '');
+  if (!envUrl) {
+    return '/todo';
+  }
+  if (envUrl.endsWith('/todo')) {
+    return envUrl;
+  }
+  return `${envUrl}/todo`;
+};
+
+const API_BASE_URL = getApiBaseUrl();
 
 function App() {
   const [todos, setTodos] = useState([]);
@@ -21,14 +33,22 @@ function App() {
       setError(null);
       const res = await fetch(`${API_BASE_URL}/`);
       if (!res.ok) {
-        throw new Error(`Failed to fetch tasks: ${res.statusText}`);
+        throw new Error(`Failed to fetch tasks (HTTP ${res.status}: ${res.statusText})`);
       }
       const data = await res.json();
-      setTodos(data);
+      if (Array.isArray(data)) {
+        setTodos(data);
+      } else {
+        console.warn('Expected list of todos but received:', data);
+        setTodos([]);
+        if (data && typeof data === 'object' && data.message) {
+          setError(`API Notice: ${data.message}`);
+        }
+      }
     } catch (err) {
-      console.error(err);
+      console.error('Fetch error:', err);
       setError(
-        'Could not connect to the backend server. Please ensure FastAPI is running at http://127.0.0.1:8000 (run `uvicorn backend.main:app --reload`).'
+        `Could not connect to backend at ${API_BASE_URL}. Ensure your backend is running on Render or locally.`
       );
     } finally {
       setLoading(false);
@@ -48,10 +68,10 @@ function App() {
         body: JSON.stringify(newTodoData),
       });
       if (!res.ok) {
-        throw new Error('Failed to create task');
+        throw new Error(`Failed to create task (HTTP ${res.status})`);
       }
       const createdTodo = await res.json();
-      setTodos((prev) => [...prev, createdTodo]);
+      setTodos((prev) => (Array.isArray(prev) ? [...prev, createdTodo] : [createdTodo]));
     } catch (err) {
       console.error(err);
       alert('Error creating task: ' + err.message);
@@ -69,7 +89,9 @@ function App() {
 
     // Optimistic UI update
     setTodos((prev) =>
-      prev.map((t) => (t.id === todo.id ? { ...t, done: !todo.done } : t))
+      Array.isArray(prev)
+        ? prev.map((t) => (t.id === todo.id ? { ...t, done: !todo.done } : t))
+        : []
     );
 
     try {
@@ -83,11 +105,12 @@ function App() {
       }
       const updatedTodo = await res.json();
       setTodos((prev) =>
-        prev.map((t) => (t.id === todo.id ? updatedTodo : t))
+        Array.isArray(prev)
+          ? prev.map((t) => (t.id === todo.id ? updatedTodo : t))
+          : [updatedTodo]
       );
     } catch (err) {
       console.error(err);
-      // Revert on error
       fetchTodos();
       alert('Error updating status: ' + err.message);
     }
@@ -105,7 +128,9 @@ function App() {
         throw new Error('Failed to update task');
       }
       const updatedTodo = await res.json();
-      setTodos((prev) => prev.map((t) => (t.id === id ? updatedTodo : t)));
+      setTodos((prev) =>
+        Array.isArray(prev) ? prev.map((t) => (t.id === id ? updatedTodo : t)) : [updatedTodo]
+      );
     } catch (err) {
       console.error(err);
       alert('Error saving task: ' + err.message);
@@ -124,32 +149,33 @@ function App() {
       if (!res.ok) {
         throw new Error('Failed to delete task');
       }
-      setTodos((prev) => prev.filter((t) => t.id !== id));
+      setTodos((prev) => (Array.isArray(prev) ? prev.filter((t) => t.id !== id) : []));
     } catch (err) {
       console.error(err);
       alert('Error deleting task: ' + err.message);
     }
   };
 
-  // Filtered & Searched todos
-  const filteredTodos = todos.filter((todo) => {
+  // Safe todos list
+  const safeTodos = Array.isArray(todos) ? todos : [];
+
+  const filteredTodos = safeTodos.filter((todo) => {
+    if (!todo) return false;
     const matchesFilter =
       filter === 'all'
         ? true
         : filter === 'completed'
-        ? todo.done
+        ? Boolean(todo.done)
         : !todo.done;
 
-    const matchesSearch =
-      todo.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      (todo.description &&
-        todo.description.toLowerCase().includes(searchQuery.toLowerCase()));
+    const titleMatch = (todo.title || '').toLowerCase().includes(searchQuery.toLowerCase());
+    const descMatch = (todo.description || '').toLowerCase().includes(searchQuery.toLowerCase());
 
-    return matchesFilter && matchesSearch;
+    return matchesFilter && (titleMatch || descMatch);
   });
 
-  const totalCount = todos.length;
-  const completedCount = todos.filter((t) => t.done).length;
+  const totalCount = safeTodos.length;
+  const completedCount = safeTodos.filter((t) => Boolean(t.done)).length;
   const pendingCount = totalCount - completedCount;
 
   return (
